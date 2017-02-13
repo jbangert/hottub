@@ -10,6 +10,7 @@ OneWire oneWire(ONE_WIRE_BUS);
 // Pass our oneWire reference to Dallas Temperature. 
 DallasTemperature sensors(&oneWire);
 
+DeviceAddress thermometer;
 int deviceCount = 0;
 void setup() {
   // put your setup code here, to run once:
@@ -26,8 +27,7 @@ void setup() {
   Serial.print(deviceCount, DEC);
   Serial.println("devices.");
   for (int i = 0; i < deviceCount; i++) { 
-    DeviceAddress insideThermometer;
-    if (!sensors.getAddress(insideThermometer, i)) { 
+    if (!sensors.getAddress(thermometer, i)) { 
       Serial.print("Unable to find address for device");
       Serial.print(i, DEC);
       Serial.println(".");
@@ -35,8 +35,8 @@ void setup() {
     Serial.print("Device at index ");
     Serial.print(i);
     Serial.print(" ");
-    for(int j=0;j<sizeof(insideThermometer);j++) { 
-      Serial.print(insideThermometer[j], HEX);
+    for(int j=0;j<sizeof(thermometer);j++) { 
+      Serial.print(thermometer[j], HEX);
     }
     Serial.println(".");
   }
@@ -44,6 +44,11 @@ void setup() {
 }
 
 void loop() {
+    sensors.requestTemperatures(); // Send the command to get temperatures
+
+  float temp = sensors.getTempC(thermometer);
+  Serial.print("Temperature");
+  Serial.println(temp);
   // put your main code here, to run repeatedly:
 
 }
