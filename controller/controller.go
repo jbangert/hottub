@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"io"
 	"log"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+        "github.com/tarm/serial"
 )
 
 type Hottub struct {
@@ -20,22 +20,16 @@ type Hottub struct {
 	heater chan bool
 }
 
-func (h *Hottub) Run() {
+func (h *Hottub) Start() {
 	// TODO(bangert): Start socket
 	log.Printf("Starting hottub process")
-	cmd := exec.Command("screen -S hottub /dev/ttyAMA0 57600")
-	h.heater = make(chan bool)
-	inpipe, err := cmd.StdoutPipe()
+	config := &serial.Config{Name:"/dev/ttyAMA0", Baud: 57600}
+	port, err := serial.OpenPort(config)
 	if err != nil {
-		log.Fatalf("Cannot open pipe %v", err)
+		log.Fatalf("Cannot open serial port")
 	}
-	go h.communicateSensor(inpipe)
-	//	outpipe, err := cmd.StdoutPipe()
-	//	if err != nil {
-	//		log.Fatalf("Cannot open output pipe %v", err)
-
-	err = cmd.Run()
-
+	h.heater = make(chan bool)
+	go h.communicateSensor(port)
 	if err != nil {
 		log.Printf("Error when running screen %v", err)
 	}
@@ -74,6 +68,7 @@ func (h *Hottub) communicateSensor(rawArduino io.ReadCloser) {
 			continue
 		}
 		field, value := parsed[0], parsed[1]
+		value = strings.TrimSuffix(value, "\r\n")
 		if value == "85.00C" || value == "-127.00C" {
 			continue
 		}
@@ -82,12 +77,14 @@ func (h *Hottub) communicateSensor(rawArduino io.ReadCloser) {
 		case "28FF31DC7016584":
 			h.inletTemp, err = strconv.ParseFloat(strings.TrimSuffix(value, "C"), 64)
 			if err != nil {
-				log.Fatalf("Cannot parse float %v", err)
+				log.Printf("Cannot parse float %v", err)
+				continue
 			}
 		case "28FF1D647116425":
 			h.outletTemp, err = strconv.ParseFloat(strings.TrimSuffix(value, "C"), 64)
 			if err != nil {
-				log.Fatalf("Cannot parse float %v", err)
+				log.Printf("Cannot parse float %v", err)
+				continue
 			}
 		case "Status":
 			// Actual status

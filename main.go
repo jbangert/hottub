@@ -4,7 +4,8 @@ import (
 	"crypto/tls"
 	"github.com/jbangert/hottub/controller"
     "golang.org/x/crypto/acme/autocert"
-    "net/http"
+	"net/http"
+	"fmt"
 )
 
 
@@ -15,9 +16,9 @@ func main() {
         Cache:      autocert.DirCache("/home/pi/ssl"), //folder for storing certificates
     }
     hottub := controller.Hottub{}
-    go hottub.Run()	
+    hottub.Start()	
     http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-	    w.Write([]byte(fmt.Formatf("Hottub: %v Celsius, Heater: %v Celsius", hottub.GetInletTemp(), hottub.GetOutletTemp())))
+	    w.Write([]byte(fmt.Sprintf("Hottub: %v Celsius, Heater: %v Celsius", hottub.GetInletTemp(), hottub.GetOutletTemp())))
     })
 
     server := &http.Server{
