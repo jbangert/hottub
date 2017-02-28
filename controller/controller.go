@@ -29,7 +29,7 @@ func (h *Hottub) Start() {
 		log.Fatalf("Cannot open serial port")
 	}
 	h.heater = make(chan bool)
-	go h.communicateCommand(h.heater)
+	go h.communicateCommand(port)
 	go h.communicateSensor(port)
 	go h.control()
 	if err != nil {
@@ -41,9 +41,9 @@ func (h *Hottub) control() {
 	for {
 		time.Sleep(100 * time.Millisecond)
 		if h.inletTemp < h.targetTemp {
-			h.heaterCommand <- true
+			h.heater <- true
 		} else {
-			h.heaterCommand <- false
+			h.heater <- false
 		}
 	}
 }
@@ -124,4 +124,6 @@ func (h *Hottub) GetOutletTemp() float64 {
 	return h.outletTemp
 }
 
-
+func (h *Hottub) GetStatus() string {
+	return h.statusMessage
+}

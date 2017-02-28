@@ -4,41 +4,53 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"fmt"
-	"github.com/jbangert/hottub/controller"
-	"golang.org/x/crypto/acme/autocert"
-	"net/http"
-
+	"github.com/gorilla/csrf"
+	"github.com/gorilla/context"
 	"github.com/gorilla/pat"
 	"github.com/gorilla/sessions"
+	"github.com/jbangert/hottub/controller"
 	"github.com/markbates/goth"
 	"github.com/markbates/goth/gothic"
 	"github.com/markbates/goth/providers/github"
+	"golang.org/x/crypto/acme/autocert"
+	"html/template"
+	"log"
+	"net/http"
+	"os"
+	"strconv"
 )
 
-var CSRF [32]byte
+type IndexData struct {
+	InletTemp     float64
+	OutletTemp    float64
+	Status        string
+	Username      string
+	Authenticated bool
+	CSRFTag       template.HTML
+}
 
+func randKey() []byte {
+	key := make([]byte, 32)
+	_, err := rand.Read(key)
+	if err != nil {
+		panic(err)
+	}
+	return key
+}
+
+var	store = sessions.NewCookieStore(randKey(), randKey())
 func init() {
-	store := sessions.NewFilesystemStore(os.TempDir(), []byte("goth-example"))
 
 	// set the maxLength of the cookies stored on the disk to a larger number to prevent issues with:
 	// securecookie: the value is too long
 	// when using OpenID Connect , since this can contain a large amount of extra information in the id_token
 
-	// Note, when using the FilesystemStore only the session.ID is written to a browser cookie, so this is explicit for the storage on disk
-	store.MaxLength(math.MaxInt64)
-
 	gothic.Store = store
-
-	_, err := rand.Read(CSRF)
-	if err != nil {
-		panic(err)
-	}
 }
-
 
 func main() {
 	goth.UseProviders(
-		github.New(os.Getenv("GITHUB_KEY"), os.Getenv("GITHUB_SECRET"), "https://hottub.ninja/auth/github/callback"))
+		github.New(os.Getenv("GITHUB_KEY"), os.Getenv("GITHUB_SECRET"), "https://hottub.ninja/auth/github/callback", "user:email"))
 
 	certManager := autocert.Manager{
 		Prompt:     autocert.AcceptTOS,
@@ -50,51 +62,63 @@ func main() {
 
 	p := pat.New()
 	p.Get("/auth/{provider}/callback", func(res http.ResponseWriter, req *http.Request) {
-
 		user, err := gothic.CompleteUserAuth(res, req)
 		if err != nil {
-			fmt.Fprintln(res, err)
+			res.WriteHeader(http.StatusForbidden)
+			fmt.Fprintln(res, "Error authenticating")
+			log.Printf("Error  authenticating user %v", err)
 			return
 		}
-		t, _ := template.New("foo").Parse(userTemplate)
-		t.Execute(res, user)
+		session, _ := store.Get(req, "hottub")
+		session.Values["Email"] = user.Email
+		session.Save(req, res)
+		log.Printf("Logged in %v", user)
+		http.Redirect(res, req, "/", 302)
 	})
 
 	p.Get("/auth/{provider}", func(res http.ResponseWriter, req *http.Request) {
 		// try to get the user without re-authenticating
-		if gothUser, err := gothic.CompleteUserAuth(res, req); err == nil {
-			t, _ := template.New("foo").Parse(userTemplate)
-			t.Execute(res, gothUser)
+		if _, err := gothic.CompleteUserAuth(res, req); err == nil {
+			http.Redirect(res, req, "/", 302)
 		} else {
 			gothic.BeginAuthHandler(res, req)
 		}
 	})
 
 	p.Get("/", func(res http.ResponseWriter, req *http.Request) {
-		indexTemplate.Execute(res, map[string]interface{}{
-			csrf.TemplateTag: csrf.TemplateField(req),
-		})
+		indexData := IndexData{
+			InletTemp:  hottub.GetInletTemp(),
+			OutletTemp: hottub.GetOutletTemp(),
+			Status:     hottub.GetStatus(),
+			CSRFTag:    csrf.TemplateField(req),
+		}
+		session, _ := store.Get(req, "hottub")
+		email := session.Values["Email"]
+		if email != nil { 
+			indexData.Username = email.(string)
+			indexData.Authenticated = authenticated(indexData.Username) 
+		}
+		indexTemplate.Execute(res, indexData)
 	})
 
-	p.Post("/", func (res http.ResponseWriter, req *http.Request) {
-		user, err := gothic.CompleteUserAuth(res, req)
-		if err != nil || !authenticated(user) {
+	p.Post("/", func(res http.ResponseWriter, req *http.Request) {
+		session, _ := store.Get(req, "hottub")
+		user := session.Values["Email"]
+		if user == nil && !authenticated(user.(string)) {
 			res.WriteHeader(http.StatusForbidden)
-			res.Write("Error authenticating")			
-			log.Printf("Error  authenticating user %v", err)
+			fmt.Fprintln(res, "Error authenticating")
 			return
 		}
-		err = req.ParseForm()
+		err := req.ParseForm()
 		if err != nil {
 			res.WriteHeader(http.StatusBadRequest)
-			res.Write("Cannot parse request")	
+			fmt.Fprintln(res, "Cannot parse request")
 			log.Printf("Cannot parse the request %v", err)
 			return
 		}
-		if  req.FormValue["status"]  == "On" {
-			hottub.SetTargetTemp(40)
-		} else {
-			hottub.SetTargetTemp(-20)
+		target, err := strconv.ParseFloat(req.FormValue("status"), 64)
+		if err == nil && target < 41 {
+			hottub.SetTargetTemp(target)
 		}
 		http.Redirect(res, req, "/", 303)
 	})
@@ -104,38 +128,36 @@ func main() {
 		TLSConfig: &tls.Config{
 			GetCertificate: certManager.GetCertificate,
 		},
+		Handler: csrf.Protect(randKey())(context.ClearHandler(p)),
 	}
 
-	server.ListenAndServeTLS("", "", csrf.Protect(CSRF)(p)) //key and cert are comming from Let's Encrypt
+	server.ListenAndServeTLS("", "") //key and cert are comming from Let's Encrypt
 }
 
-type IndexData struct {
-	InletTemp float64
-	OutletTemp float64
-	Status string
-	User *goth.User
-}
-
-func authenticated (user *goth.User) bool {
-	if user.Email == "nathan@nixpulvis.com" || user.Email == "jbangert@acm.org" {
+func authenticated(user string) bool {
+	if user == "nathan@nixpulvis.com" || user == "jbangert@acm.org" {
 		return true
 	}
 	return false
 }
 
-var templateFuncs = template.FuncMap{"authenticated", authenticated}
-var indexTemplate = template.Must(template.New("Index").FuncMap(templateFuncs).Parse(`
+var indexTemplate = template.Must(template.New("Index").Parse(`
 <html>
 <head><title>Hottub</title></head>
 <body>
-<p> Inlet {{.InletTemp}}</p>
-<p> Outlet {{.OutletTemp}}</p>
+<p> Hello {{.Username}}</p>
+<p> Inlet {{.InletTemp}}C</p>
+<p> Outlet {{.OutletTemp}}C</p>
 <p> Status {{.Status}}</p>
-{{if authenticated User}}
+
+{{if .Authenticated}}
 <form><input method="POST" action="/">
-    <input type="submit" name="status" value="On">
-    <input type="submit" name="status" value="Off">
+    <input type="submit" name="temperature" value="40">
+    <input type="submit" name="temperature" value="0">
+    {{.CSRFTag}}
 </form>
+{{else}}
+<p><a href="/auth/github/">Login</a></p>
 {{end}}
 </body>
-</html>`)
+</html>`))
