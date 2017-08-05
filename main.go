@@ -18,9 +18,12 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"runtime"
 )
 
+
 type IndexData struct {
+	TargetTemp    float64
 	InletTemp     float64
 	OutletTemp    float64
 	Status        string
@@ -40,7 +43,7 @@ func randKey() []byte {
 
 var	store = sessions.NewCookieStore(randKey(), randKey())
 func init() {
-
+	runtime.GOMAXPROCS(2) 
 	// set the maxLength of the cookies stored on the disk to a larger number to prevent issues with:
 	// securecookie: the value is too long
 	// when using OpenID Connect , since this can contain a large amount of extra information in the id_token
@@ -89,6 +92,7 @@ func main() {
 		indexData := IndexData{
 			InletTemp:  hottub.GetInletTemp(),
 			OutletTemp: hottub.GetOutletTemp(),
+			TargetTemp: hottub.GetTargetTemp(),
 			Status:     hottub.GetStatus(),
 			CSRFTag:    csrf.TemplateField(req),
 		}
@@ -116,9 +120,13 @@ func main() {
 			log.Printf("Cannot parse the request %v", err)
 			return
 		}
-		target, err := strconv.ParseFloat(req.FormValue("status"), 64)
+		target, err := strconv.ParseFloat(req.FormValue("temperature"), 64)
 		if err == nil && target < 41 {
 			hottub.SetTargetTemp(target)
+		} else {
+			res.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintln(res, "Error %v with handling temperature %v", err, target)
+			return
 		}
 		http.Redirect(res, req, "/", 303)
 	})
@@ -135,7 +143,7 @@ func main() {
 }
 
 func authenticated(user string) bool {
-	if user == "nathan@nixpulvis.com" || user == "jbangert@acm.org" {
+	if user == "karshan.sharma@gmail.com" || user == "julian."+"o.b." + "bangert" + "@dartmouth.edu" {
 		return true
 	}
 	return false
@@ -147,12 +155,16 @@ var indexTemplate = template.Must(template.New("Index").Parse(`
 <body>
 <p> Hello {{.Username}}</p>
 <p> Inlet {{.InletTemp}}C</p>
+<p> Target {{.TargetTemp}}C</p>
 <p> Outlet {{.OutletTemp}}C</p>
 <p> Status {{.Status}}</p>
 
 {{if .Authenticated}}
-<form><input method="POST" action="/">
+<form method="POST" action="/">
     <input type="submit" name="temperature" value="40">
+    <input type="submit" name="temperature" value="39">
+    <input type="submit" name="temperature" value="38">
+    <input type="submit" name="temperature" value="37">
     <input type="submit" name="temperature" value="0">
     {{.CSRFTag}}
 </form>

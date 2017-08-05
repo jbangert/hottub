@@ -2,12 +2,13 @@ package controller
 
 import (
 	"bufio"
+	"github.com/tarm/serial"
 	"io"
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-        "github.com/tarm/serial"
 )
 
 type Hottub struct {
@@ -18,12 +19,14 @@ type Hottub struct {
 	statusMessage string
 
 	heater chan bool
+
+	mu sync.Mutex
 }
 
 func (h *Hottub) Start() {
 	// TODO(bangert): Start socket
 	log.Printf("Starting hottub process")
-	config := &serial.Config{Name:"/dev/ttyAMA0", Baud: 57600}
+	config := &serial.Config{Name: "/dev/ttyAMA0", Baud: 57600}
 	port, err := serial.OpenPort(config)
 	if err != nil {
 		log.Fatalf("Cannot open serial port")
@@ -39,10 +42,10 @@ func (h *Hottub) Start() {
 
 func (h *Hottub) control() {
 	for {
-		time.Sleep(100 * time.Millisecond)
-		if h.inletTemp < h.targetTemp {
+		time.Sleep(1000 * time.Millisecond)
+		if h.GetInletTemp() < h.GetTargetTemp() - 1 {
 			h.heater <- true
-		} else {
+		} else if h.GetInletTemp() > h.GetTargetTemp() {
 			h.heater <- false
 		}
 	}
@@ -88,20 +91,26 @@ func (h *Hottub) communicateSensor(rawArduino io.ReadCloser) {
 
 		switch field {
 		case "28FF31DC7016584":
+			h.mu.Lock()
 			h.inletTemp, err = strconv.ParseFloat(strings.TrimSuffix(value, "C"), 64)
+			h.mu.Unlock()
 			if err != nil {
 				log.Printf("Cannot parse float %v", err)
 				continue
 			}
 		case "28FF1D647116425":
+			h.mu.Lock()
 			h.outletTemp, err = strconv.ParseFloat(strings.TrimSuffix(value, "C"), 64)
+			h.mu.Unlock()
 			if err != nil {
 				log.Printf("Cannot parse float %v", err)
 				continue
 			}
 		case "Status":
 			// Actual status
+			h.mu.Lock()
 			h.statusMessage = value
+			h.mu.Unlock()
 		default:
 			log.Printf("Unknown field %v with value %v received", field, value)
 		}
@@ -110,20 +119,30 @@ func (h *Hottub) communicateSensor(rawArduino io.ReadCloser) {
 }
 
 func (h *Hottub) GetTargetTemp() float64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return h.targetTemp
 }
 func (h *Hottub) SetTargetTemp(temp float64) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.targetTemp = temp
 }
 
 func (h *Hottub) GetInletTemp() float64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return h.inletTemp
 }
 
 func (h *Hottub) GetOutletTemp() float64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return h.outletTemp
 }
 
 func (h *Hottub) GetStatus() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	return h.statusMessage
 }
