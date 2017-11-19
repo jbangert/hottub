@@ -165,7 +165,7 @@ var indexTemplate = template.Must(template.New("Index").Parse(`
     <input type="submit" name="temperature" value="39">
     <input type="submit" name="temperature" value="38">
     <input type="submit" name="temperature" value="37">
-    <input type="submit" name="temperature" value="0">
+    <input type="submit" name="temperature" value="-256">
     {{.CSRFTag}}
 </form>
 {{else}}
