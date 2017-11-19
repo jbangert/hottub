@@ -90,7 +90,7 @@ func (h *Hottub) communicateSensor(rawArduino io.ReadCloser) {
 		}
 
 		switch field {
-		case "28FF31DC7016584":
+		case "28FF6D317116411":
 			h.mu.Lock()
 			h.inletTemp, err = strconv.ParseFloat(strings.TrimSuffix(value, "C"), 64)
 			h.mu.Unlock()
@@ -98,7 +98,7 @@ func (h *Hottub) communicateSensor(rawArduino io.ReadCloser) {
 				log.Printf("Cannot parse float %v", err)
 				continue
 			}
-		case "28FF1D647116425":
+		case "28FFBEE70165F2":
 			h.mu.Lock()
 			h.outletTemp, err = strconv.ParseFloat(strings.TrimSuffix(value, "C"), 64)
 			h.mu.Unlock()
